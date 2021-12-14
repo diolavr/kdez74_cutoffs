@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 
-import requests
-import lxml.etree
-import io
+import requests, lxml.etree, io, os, hashlib
 
 # Consts
 USER_AGENT = 'repairer/myhome'
@@ -12,11 +10,43 @@ ACCEPT_CONTENT = 'text/html; charset=utf-8'
 TARGET_URL = 'https://www.kdez74.ru/HouseSearch/CutOffs'
 
 # xPathes
+XPATH_MAINCONTENT = '//*[@id="MainContent"]'
 XPATH_GOOD = '//*[@id="MainContent"]/div'
 XPATH_TABLE = '//*[@id="cutoff_table"]'
 XPATH_TABLE_ROWS = './/tbody/tr'
 XPATH_TABLE_COLS = './/td'
 XPATH_TEXT = './/text()'
+
+SUM_FILE = 'page.sum'
+
+def readSum(file):
+    if os.path.isfile(file):
+        with open(file, 'r') as f:
+            return f.read()
+    return ''
+
+def writeSum(file, value):
+    if len(value) == 0:
+        return 
+        
+    with open(file, 'w+') as f:
+        f.write(value)
+        f.flush()
+
+def checkSum(s):
+    if len(s) == 0:
+        return False
+
+    filesum = readSum(SUM_FILE)
+
+    sum = hashlib.md5(s).hexdigest()
+    
+    if sum == filesum:
+        return True
+
+    writeSum(SUM_FILE, sum)
+
+    return False
 
 def main():
 
@@ -37,12 +67,25 @@ def main():
     # @root - <Element html at 0x...>
     root = tree.getroot()
 
+    # @root - <Element div at 0x...>
+    main = root.xpath(XPATH_MAINCONTENT)
+    if len(main) == 0:
+        print('cant found node {}'.format(XPATH_MAINCONTENT))
+        return
+
+    main = main[0]
+
+    string_data = main.xpath("string()")
+    if checkSum(string_data.encode('utf-8')):
+        print('no changes')
+        return
+
     # @table - [<Element table at 0x...>, ]
-    table = root.xpath(XPATH_TABLE)
+    table = main.xpath(XPATH_TABLE)
     if len(table) == 0:
 
         text = []
-        for nodes in root.xpath(XPATH_GOOD):
+        for nodes in main.xpath(XPATH_GOOD):
             for n in nodes.xpath(XPATH_TEXT):
                 t = n.strip()
                 if len(t) == 0:
