@@ -4,7 +4,7 @@
 import io, os, hashlib
 import logging, sys
 import lxml.etree
-import requests
+import requests, json
 
 TG_BOT_TOKEN = ''
 TG_CHANNEL_ID= ''
@@ -34,49 +34,82 @@ handler.setFormatter(formatter)
 logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 
-def readSum(file):
+
+def write_log(msg):
+    logger.info(msg)
+
+def read_file(file):
     if os.path.isfile(file):
-        with open(file, 'r') as f:
-            return f.read()
+        with open(file, 'r', encoding='utf-8') as fp:
+            return fp.read()
     return ''
 
-def writeSum(file, value):
-    if len(value) == 0:
-        return
-
-    with open(file, 'w+') as f:
-        f.write(value)
+def write_file(file, text):
+    with open(file, 'w+', encoding='utf-8') as f:
+        f.write(text)
         f.flush()
 
-def checkSum(s):
-    if len(s) == 0:
-        return False
 
-    filesum = readSum(SUM_FILE)
+def decode(text):
+    j = {}
 
-    sum = hashlib.md5(s).hexdigest()
+    try:
+        j = json.loads(text)
+    except Exception as e:
+        write_log(e)
+    
+    return j
 
-    if sum == filesum:
-        return True
+def encode(obj):
+    t = ''
 
-    writeSum(SUM_FILE, sum)
+    try:
+        t = json.dumps(obj)
+    except Exception as e:
+        write_log(e)
 
-    return False
+    return t
+
+def load_sum():
+    text = read_file(SUM_FILE)
+
+    if len(text) == 0:
+        return {}
+    
+    return decode(text)
+
+def save_sum(j):
+    text = encode(j)
+    write_file(SUM_FILE, text)
+
+def checksum(s):
+    return hashlib.md5(s).hexdigest()
 
 def send_msg(msg):
+    if TG_BOT_TOKEN == '' or TG_CHANNEL_ID == '':
+        return
     try:
         requests.get(TG_URL_MSG+msg)
     except Exception as e:
-        logger.info(syslog.LOG_ERR, e)
+        logger.info(e)
 
-def main():
-
+def request_page():
+    if FIAS_ID == '':
+        return None
+        
     headers = {
         'User-Agent': USER_AGENT,
         'Accept': ACCEPT_CONTENT
     }
 
-    r = requests.get(TARGET_URL, headers=headers)
+    return requests.get(TARGET_URL, headers=headers)
+
+def main():
+ 
+    r = request_page()
+    if r is None:
+        print('empty FIAS_ID')
+        return
 
     if r.status_code != requests.codes.ok:
         print('status_code not equal ', requests.codes.ok)
@@ -96,8 +129,13 @@ def main():
 
     main = main[0]
 
-    string_data = main.xpath("string()")
-    if checkSum(string_data.encode('utf-8')):
+    sums = load_sum()
+    mainblock_file_sum = sums.get('mainblock', '')
+    
+    text_data = main.xpath("string()")
+    string_data = text_data.encode('utf-8')
+    mainblock_html_sum = checksum(string_data)
+    if mainblock_file_sum == mainblock_html_sum:
         print('no changes')
         return
 
@@ -120,10 +158,14 @@ def main():
 
         # Если нет зарегистрированных отключений
         msg = " ".join(text)
+        sum = checksum(msg.encode('utf-8'))
+        
         logger.info(msg)
         send_msg(msg)
+        save_sum({ 'mainblock': mainblock_html_sum, 'notices': [] })
         return
 
+    notices = sums.get('notices', [])
     # [<Element tr at 0x...>, ]
     for tr in table[0].xpath(XPATH_TABLE_ROWS):
 
@@ -148,10 +190,18 @@ def main():
 
         if len(trtext) == 0:
             continue
+        
+        rtext_string = ' / '.join(trtext)
+        sum = checksum(rtext_string.encode('utf-8'))
 
-        logger.info("{}".format(' / '.join(trtext)))
-        send_msg('\n'.join(trtext))
+        if sum not in notices:
+            logger.info("{}".format(rtext_string))
+            send_msg('\n'.join(trtext))
+            notices.append(sum)
+
     # for tr (END)
+
+    save_sum({ 'mainblock': mainblock_html_sum, 'notices': notices })
 
 if __name__ == '__main__':
     main()
