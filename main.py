@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 
-import requests, lxml.etree, io, os, hashlib
+import io, os, hashlib
+import logging, sys
+import lxml.etree
+import requests
+
+TG_BOT_TOKEN = ''
+TG_CHANNEL_ID= ''
+TG_URL_MSG = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&text='.format(TG_BOT_TOKEN, TG_CHANNEL_ID)
 
 # Consts
 USER_AGENT = 'repairer/myhome'
 ACCEPT_CONTENT = 'text/html; charset=utf-8'
 
-TARGET_URL = 'https://www.kdez74.ru/HouseSearch/CutOffs'
+FIAS_ID = ''
+TARGET_URL = 'https://www.kdez74.ru/HouseSearch/CutOffs{}'.format("/"+FIAS_ID)
 
 # xPathes
 XPATH_MAINCONTENT = '//*[@id="MainContent"]'
@@ -19,6 +27,13 @@ XPATH_TEXT = './/text()'
 
 SUM_FILE = 'page.sum'
 
+logger = logging.getLogger("KDEZ74_CUTOFFS")
+formatter = logging.Formatter(fmt="%(asctime)s %(name)s.%(levelname)s: %(message)s", datefmt="%Y.%m.%d %H:%M:%S")
+handler = logging.StreamHandler(stream=sys.stdout)
+handler.setFormatter(formatter)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+
 def readSum(file):
     if os.path.isfile(file):
         with open(file, 'r') as f:
@@ -27,8 +42,8 @@ def readSum(file):
 
 def writeSum(file, value):
     if len(value) == 0:
-        return 
-        
+        return
+
     with open(file, 'w+') as f:
         f.write(value)
         f.flush()
@@ -40,13 +55,19 @@ def checkSum(s):
     filesum = readSum(SUM_FILE)
 
     sum = hashlib.md5(s).hexdigest()
-    
+
     if sum == filesum:
         return True
 
     writeSum(SUM_FILE, sum)
 
     return False
+
+def send_msg(msg):
+    try:
+        requests.get(TG_URL_MSG+msg)
+    except Exception as e:
+        logger.info(syslog.LOG_ERR, e)
 
 def main():
 
@@ -90,25 +111,25 @@ def main():
                 t = n.strip()
                 if len(t) == 0:
                     continue
-                
+
                 text.append(t)
-            
+
         if len(text) == 0:
             print('cant found any nodes')
             return
 
-        # Если нет запланированных отключений
+        # Если нет зарегистрированных отключений
         msg = " ".join(text)
-        print(msg)
+        logger.info(msg)
+        send_msg(msg)
         return
 
-    tabletext = []
     # [<Element tr at 0x...>, ]
     for tr in table[0].xpath(XPATH_TABLE_ROWS):
 
         trtext = []
         # [<Element td at 0x...>, ]
-        for td in tr.xpath(XPATH_TABLE_COLS):
+        for td in tr.xpath(XPATH_TABLE_COLS)[1:]:
 
             tdtext = []
             for nodes in td.xpath(XPATH_TEXT):
@@ -128,11 +149,9 @@ def main():
         if len(trtext) == 0:
             continue
 
-        tabletext.append(' / '.join(trtext))
+        logger.info("{}".format(' / '.join(trtext)))
+        send_msg('\n'.join(trtext))
     # for tr (END)
-
-    # Собрали список запланированных отключений
-    print(tabletext)
 
 if __name__ == '__main__':
     main()
